@@ -1,0 +1,19 @@
+$TTL 604800
+@       IN  SOA ns1.ocp.com. root.ocp.com. (
+            2025101001        ; Serial
+            3H   ; Refresh
+            30M    ; Retry
+            2W   ; Expire
+            1W ) ; Minimum
+
+        IN  NS  ns1.ocp.com.
+
+1   IN PTR admin.ocp.com.
+1   IN PTR api.test.ocp.com.
+1   IN PTR api-int.test.ocp.com.
+9   IN PTR bootstrap.test.ocp.com.
+10  IN PTR cp-1.test.ocp.com.
+;11  IN PTR cp-2.test.ocp.com.
+;12  IN PTR cp-3.test.ocp.com.
+20  IN PTR w-1.test.ocp.com.
+
