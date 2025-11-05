@@ -1,0 +1,20 @@
+$TTL 1W
+@       IN  SOA     dns.test.ocp.com. root.test.ocp.com. (
+                2025100101  ; Serial
+                3H          ; Refresh
+                30M         ; Retry
+                2W          ; Expire
+                1W )        ; Minimum TTL
+
+        IN  NS      dns.test.ocp.com.
+
+; --- PTR Records for all hosts ---
+
+131     IN  PTR     dns.test.ocp.com.
+131     IN  PTR     admin.test.ocp.com.
+133     IN  PTR     bootstrap.test.ocp.com.
+134     IN  PTR     cp-1.test.ocp.com.
+135     IN  PTR     cp-2.test.ocp.com.
+136     IN  PTR     cp-3.test.ocp.com.
+214     IN  PTR     w-1.test.ocp.com.
+
