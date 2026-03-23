@@ -1,51 +1,94 @@
-# OpenShift 4.14.x High Availability (HA) UPI Installation Guide
+# 🔴 OpenShift 4.19.x High Availability Cluster — Bare Metal UPI
 
-This guide provides a complete **step-by-step runbook** for deploying a **High Availability OpenShift 4.14.x cluster** using the **User-Provisioned Infrastructure (UPI)** method on **bare metal servers** with **HAProxy** as the load balancer.
+[![OpenShift](https://img.shields.io/badge/OpenShift-4.19.x-EE0000?logo=redhatopenshift&logoColor=white&style=for-the-badge)](https://docs.openshift.com)
+[![Platform](https://img.shields.io/badge/Platform-Bare%20Metal-333333?style=for-the-badge)](https://github.com/kishor-95)
+[![Method](https://img.shields.io/badge/Method-UPI-0066CC?style=for-the-badge)](https://github.com/kishor-95)
+[![LB](https://img.shields.io/badge/Load%20Balancer-HAProxy-lightgrey?style=for-the-badge)](https://github.com/kishor-95)
+[![DNS](https://img.shields.io/badge/DNS-BIND-orange?style=for-the-badge)](https://github.com/kishor-95)
+[![Virtualization](https://img.shields.io/badge/Virtualization-KVM%2FVMware-blue?style=for-the-badge)](https://github.com/kishor-95)
+
+A complete **production-grade runbook** for deploying a **High Availability OpenShift 4.19.x cluster** on **bare metal** using the **User-Provisioned Infrastructure (UPI)** method — with HAProxy load balancing, BIND DNS, and HTTPD ignition file serving configured from scratch.
+
+> ⚠️ This is not a lab guide. This reflects real infrastructure deployment with 3 control plane nodes, 2 workers, and full HA configuration — nodes provisioned via live CoreOS ISO on KVM/VMware.
 
 ---
 
-## 1. Overview
+## 🏗️ Cluster Architecture
+```mermaid
+flowchart TD
+    A[👨‍💻 Admin Host] -->|Generates ignition files| B[🌐 HTTP Server :80\n192.168.65.128]
+    A -->|openshift-install| C[⚖️ HAProxy Load Balancer\n192.168.65.2]
 
-### Cluster Topology
-| Role | Quantity | Example Hostnames | Example IPs |
-|------|-----------|------------------|--------------|
+    C -->|6443 / 22623| D[🖥️ Master 1 - cp-1\n192.168.65.10]
+    C -->|6443 / 22623| E[🖥️ Master 2 - cp-2\n192.168.65.11]
+    C -->|6443 / 22623| F[🖥️ Master 3 - cp-3\n192.168.65.12]
+    C -->|443 / 80| G[⚙️ Worker 1 - w-1\n192.168.65.20]
+    C -->|443 / 80| H[⚙️ Worker 2 - w-2\n192.168.65.21]
+
+    B -->|bootstrap.ign| I[🚀 Bootstrap Node\n192.168.65.9]
+    B -->|master.ign| D & E & F
+    B -->|worker.ign| G & H
+
+    I -->|Initializes control plane| D & E & F
+    I -.->|Removed after bootstrap complete| I
+```
+
+---
+
+## 📋 Cluster Topology
+
+| Role | Quantity | Hostnames | IPs |
+|------|----------|-----------|-----|
 | Bootstrap | 1 | `bootstrap.test.ocp.com` | `192.168.65.9` |
-| Masters | 3 | `cp-1.test.ocp.com`, `cp-2.test.ocp.com`, `cp-3.test.ocp.com` | `192.168.65.10-12` |
-| Workers | 2 | `w-1.test.ocp.com`, `w-2.test.ocp.com` | `192.168.65.20-21` |
+| Control Plane (Masters) | 3 | `cp-1`, `cp-2`, `cp-3` | `192.168.65.10–12` |
+| Workers | 2 | `w-1.test.ocp.com`, `w-2.test.ocp.com` | `192.168.65.20–21` |
 | Load Balancer | 1 | `lb.test.ocp.com` | `192.168.65.2` |
 | DNS Server | 1 | `dns.test.ocp.com` | `192.168.65.128` |
 
 ---
 
-## 2. Prerequisites
+## ✅ Prerequisites
 
-### 2.1 Software
-- `openshift-install` (v4.14.x)
+### Software Required
+- `openshift-install` (v4.19.x)
 - `oc` CLI tools
-- `httpd` (for hosting ignition files)
+- `httpd` — for hosting ignition files
 - `coreos-installer`
 - `haproxy`
 
-### 2.2 Files
+### Files Required
 - Pull secret from [Red Hat Cloud Console](https://console.redhat.com/openshift/install)
 - SSH key pair (`id_rsa` and `id_rsa.pub`)
+- Live CoreOS ISO — attached as virtual boot media per node
 
-### 2.3 Network
+### VM / Virtualization Setup
+- Hypervisor: KVM or VMware
+- Live CoreOS ISO attached as virtual boot media per node
+- Each VM disk: minimum 120GB recommended for OCP nodes
+- Network adapter in bridged mode — all nodes must reach DNS + HTTP server
+
+### DNS Records Required
+
 | Record | Type | Target |
-|---------|------|---------|
+|--------|------|--------|
 | `api.test.ocp.com` | A | `192.168.65.2` |
 | `api-int.test.ocp.com` | A | `192.168.65.2` |
 | `*.apps.test.ocp.com` | A | `192.168.65.2` |
 
-### 2.4 Firewall / Ports
-Ensure the following ports are open between nodes:
-- 6443/tcp — API Server
-- 22623/tcp — Machine Config Server
-- 443, 80/tcp — Router / Apps
+### Firewall Ports
+
+| Port | Protocol | Purpose |
+|------|----------|---------|
+| 6443 | TCP | Kubernetes API Server |
+| 22623 | TCP | Machine Config Server |
+| 9000 | TCP | HAProxy Stats Dashboard |
+| 443, 80 | TCP | Router / Apps Ingress |
 
 ---
 
-## 3. Prepare Installation Directory
+## 🚀 Step-by-Step Installation
+
+### Step 1 — Prepare Installation Directory
 ```bash
 mkdir -p ~/ocp-install
 cd ~/ocp-install
@@ -55,7 +98,7 @@ cp ~/.ssh/id_rsa.pub .
 
 ---
 
-## 4. Create `install-config.yaml`
+### Step 2 — Create `install-config.yaml`
 ```yaml
 apiVersion: v1
 baseDomain: test.ocp.com
@@ -70,9 +113,9 @@ controlPlane:
   replicas: 3
 compute:
 - name: worker
-  replicas: 2
+  replicas: 0   # Workers added manually via ignition configs
 networking:
-  networkType: OpenShiftSDN
+  networkType: OVNKubernetes
   clusterNetwork:
   - cidr: 10.128.0.0/14
     hostPrefix: 23
@@ -83,17 +126,17 @@ fips: false
 
 ---
 
-## 5. Generate Ignition Files
+### Step 3 — Generate Ignition Files
 ```bash
 openshift-install create manifests --dir=.
 openshift-install create ignition-configs --dir=.
 ls -l *.ign
 ```
-You should see `bootstrap.ign`, `master.ign`, and `worker.ign`.
+Expected output: `bootstrap.ign`, `master.ign`, `worker.ign`
 
 ---
 
-## 6. Configure HTTP Server
+### Step 4 — Configure HTTP Server (Ignition File Hosting)
 ```bash
 sudo dnf install -y httpd
 sudo mkdir -p /var/www/html/ignitions
@@ -109,34 +152,101 @@ curl http://192.168.65.128/ignitions/bootstrap.ign
 
 ---
 
-## 7. Configure HAProxy (Load Balancer)
+### Step 5 — Configure HAProxy Load Balancer
+
 Edit `/etc/haproxy/haproxy.cfg`:
 ```cfg
-frontend api_frontend
+#---------------------------------------------------------------------
+# Global Settings
+#---------------------------------------------------------------------
+global
+  log         127.0.0.1 local2
+  pidfile     /var/run/haproxy.pid
+  maxconn     4000
+  daemon
+
+#---------------------------------------------------------------------
+# Default Settings
+#---------------------------------------------------------------------
+defaults
+  mode                    tcp
+  log                     global
+  option                  dontlognull
+  option                  redispatch
+  retries                 3
+  timeout http-request    10s
+  timeout queue           1m
+  timeout connect         10s
+  timeout client          1m
+  timeout server          1m
+  timeout check           10s
+  maxconn                 3000
+
+#---------------------------------------------------------------------
+# HAProxy Stats Dashboard — http://<LB-IP>:9000/stats
+#---------------------------------------------------------------------
+listen stats
+  mode http
+  bind *:9000
+  stats uri /stats
+  stats refresh 10000ms
+
+#---------------------------------------------------------------------
+# Kubernetes API Server — Port 6443
+# Bootstrap kept as commented backup — remove after cluster init
+#---------------------------------------------------------------------
+frontend api-server
   bind *:6443
-  mode tcp
-  default_backend api_backend
+  default_backend api-server-backend
 
-backend api_backend
-  mode tcp
+backend api-server-backend
+  balance     roundrobin
+  option      ssl-hello-chk
+  # server bootstrap 192.168.65.9:6443 check fall 2 rise 3 backup   # Remove after bootstrap complete
+  server cp-1   192.168.65.10:6443 check fall 2 rise 3
+  server cp-2   192.168.65.11:6443 check fall 2 rise 3
+  server cp-3   192.168.65.12:6443 check fall 2 rise 3
+
+#---------------------------------------------------------------------
+# Machine Config Server — Port 22623
+# Serves ignition configs to nodes during bootstrap
+#---------------------------------------------------------------------
+frontend mcs
+  bind *:22623
+  default_backend mcs-backend
+
+backend mcs-backend
   balance roundrobin
-  server cp-1 192.168.65.10:6443 check
-  server cp-2 192.168.65.11:6443 check
-  server cp-3 192.168.65.12:6443 check
+  # server bootstrap 192.168.65.9:22623 check backup                # Remove after bootstrap complete
+  server cp-1   192.168.65.10:22623 check
+  server cp-2   192.168.65.11:22623 check
+  server cp-3   192.168.65.12:22623 check
 
-frontend apps_frontend
-  bind *:80
+#---------------------------------------------------------------------
+# Ingress — HTTPS Port 443
+#---------------------------------------------------------------------
+frontend ingress-https
   bind *:443
-  mode tcp
-  default_backend apps_backend
+  default_backend ingress-https-backend
 
-backend apps_backend
-  mode tcp
-  balance roundrobin
-  server cp-1 192.168.65.10:443 check
-  server cp-2 192.168.65.11:443 check
-  server cp-3 192.168.65.12:443 check
+backend ingress-https-backend
+  balance source
+  server w-1 192.168.65.20:443 check
+  server w-2 192.168.65.21:443 check
+
+#---------------------------------------------------------------------
+# Ingress — HTTP Port 80
+#---------------------------------------------------------------------
+frontend ingress-http
+  bind *:80
+  default_backend ingress-http-backend
+
+backend ingress-http-backend
+  balance source
+  server w-1 192.168.65.20:80 check
+  server w-2 192.168.65.21:80 check
 ```
+
 Enable and verify:
 ```bash
 sudo systemctl enable --now haproxy
@@ -145,75 +255,105 @@ ss -tnlp | grep haproxy
 
 ---
 
-## 8. Install RHCOS Nodes (CoreOS Installer)
+### Step 6 — Boot Nodes via Live CoreOS ISO & Install to Disk
 
-### Bootstrap
+> 🖥️ Each node (Bootstrap, Masters, Workers) was booted using the
+> **live CoreOS ISO attached as a virtual boot image in KVM/VMware.**
+> Installation to disk was performed manually from the live shell.
+
+**For each node — follow this sequence:**
+
+**6.1 — Attach & boot the live CoreOS ISO**
+- In your KVM/VMware console, attach the live CoreOS ISO as the boot device
+- Power on the VM — it boots into a live CoreOS shell (no installation yet)
+
+**6.2 — Verify network connectivity from live shell**
 ```bash
-sudo coreos-installer install --insecure --ignition-url http://192.168.65.128/ignitions/bootstrap.ign /dev/sda
-sudo reboot
+ip a
+ping 192.168.65.128    # Confirm you can reach the HTTP server hosting ignition files
 ```
 
-### Masters
-Repeat for each master node:
+**6.3 — Run coreos-installer manually from live shell**
+
+Bootstrap node:
 ```bash
-sudo coreos-installer install --insecure --ignition-url http://192.168.65.128/ignitions/master.ign /dev/sda
-sudo reboot
+sudo coreos-installer install /dev/sda \
+  --insecure \
+  --ignition-url http://192.168.65.128/ignitions/bootstrap.ign
 ```
 
-### Workers
-Repeat for each worker node:
+Each Master (cp-1, cp-2, cp-3):
 ```bash
-sudo coreos-installer install --insecure --ignition-url http://192.168.65.128/ignitions/worker.ign /dev/sda
+sudo coreos-installer install /dev/sda \
+  --insecure \
+  --ignition-url http://192.168.65.128/ignitions/master.ign
+```
+
+Each Worker (w-1, w-2):
+```bash
+sudo coreos-installer install /dev/sda \
+  --insecure \
+  --ignition-url http://192.168.65.128/ignitions/worker.ign
+```
+
+**6.4 — Reboot into installed system**
+```bash
 sudo reboot
+```
+> ⚠️ **Detach the ISO before reboot or change the boot order to installed disk** — otherwise the VM boots back into the live shell instead of the installed disk.
+
+**6.5 — Verify node appeared on admin host**
+```bash
+oc get nodes -w
 ```
 
 ---
 
-## 9. Start Installation
-On the admin host:
+### Step 7 — Start & Monitor Installation
 ```bash
 openshift-install create cluster --dir=~/ocp-install --log-level=info
-```
-Monitor logs:
-```bash
 tail -f ~/ocp-install/.openshift_install.log
 ```
 
 ---
 
-## 10. Monitor Bootstrap Progress
+### Step 8 — Wait for Bootstrap Complete
 ```bash
-openshift-install wait-for bootstrap-complete --dir=~/ocp-install --log-level=debug
+openshift-install wait-for bootstrap-complete \
+  --dir=~/ocp-install --log-level=debug
 ```
-Once complete, remove the bootstrap server from HAProxy.
+> ✅ Once complete — **remove the bootstrap node from HAProxy backends and power it off.**
 
 ---
 
-## 11. Configure Cluster Access
+### Step 9 — Configure Cluster Access & Approve CSRs
 ```bash
 export KUBECONFIG=~/ocp-install/auth/kubeconfig
 oc get nodes
 ```
-Approve pending CSRs:
+Approve all pending CSRs — **run this twice** (once for client CSRs, once for server CSRs):
 ```bash
 oc get csr
-for csr in $(oc get csr --no-headers | awk '{print $1}'); do oc adm certificate approve $csr; done
+for csr in $(oc get csr --no-headers | awk '{print $1}'); do
+  oc adm certificate approve $csr
+done
 ```
 
 ---
 
-## 12. Wait for Cluster Operators
+### Step 10 — Wait for All Cluster Operators
 ```bash
 oc get co
 ```
-All operators should report:
-- `AVAILABLE=True`
-- `PROGRESSING=False`
-- `DEGRADED=False`
+All operators must show:
+
+| AVAILABLE | PROGRESSING | DEGRADED |
+|-----------|-------------|----------|
+|   True    |   False     |   False  |
 
 ---
 
-## 13. Verify Installation
+### Step 11 — Final Verification
 ```bash
 oc get nodes -o wide
 oc get pods -A | egrep -v 'Running|Completed'
@@ -222,28 +362,42 @@ oc get clusterversion
 
 ---
 
-## 14. Next Steps
-After successful installation:
-- Configure **image registry storage** (NFS or PVC)
-- Apply **custom self-signed TLS certificates**
-- Create **admin/developer users** via HTPasswd
+## 🔧 Post-Install Checklist
 
-Those post-install tasks are covered in a separate guide: [README-postinstall.md](README-postinstall.md)
+- [ ] Configure image registry storage (NFS or PVC)
+- [ ] Apply custom self-signed TLS certificates
+- [ ] Create admin/developer users via HTPasswd
+- [ ] Remove bootstrap VM from HAProxy and power off
+- [ ] Backup `auth/kubeconfig` securely
+- [ ] Set up regular operator and node health checks
 
----
-
-## 15. Cleanup and Maintenance
-- Remove bootstrap VM after success.
-- Backup `install-dir/auth/kubeconfig` securely.
-- Regularly verify operator and node health.
+> Full post-install guide → [README-postinstall.md](README-postinstall.md)
 
 ---
 
-## 16. References
-- [OpenShift Documentation: Installing on Bare Metal (UPI)](https://docs.openshift.com/container-platform/latest/installing/installing_bare_metal/installing-bare-metal.html)
+## 📁 Repo Structure
+```
+openshift-ha-upi-baremetal/
+│
+├── README.md                  ← This runbook
+├── README-postinstall.md      ← Post-install configuration guide
+├── configs/
+│   ├── install-config.yaml    ← Cluster install config template
+│   └── haproxy.cfg            ← Production HAProxy load balancer config
+└── diagrams/
+    └── cluster-architecture.png
+```
+
+---
+## 📚 References
+
+- [OpenShift UPI Bare Metal Installation Docs](https://docs.openshift.com/container-platform/latest/installing/installing_bare_metal/installing-bare-metal.html)
 - [Red Hat Knowledgebase](https://access.redhat.com/documentation/en-us/openshift_container_platform/)
+- [CoreOS Installer Docs](https://coreos.github.io/coreos-installer/)
 
 ---
 
-**End of Installation README.md**
+## 👨‍💻 Author
 
+**Kishor Bhairat** — Linux System Administrator | DevOps Engineer
+📫 bhairatkishor@gmail.com | [LinkedIn](https://www.linkedin.com/in/kishor-bhairat) | [GitHub](https://github.com/kishor-95)
