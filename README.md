@@ -109,7 +109,7 @@ ssh-add -l
 ### Step 2 — Create `install-config.yaml`
 ```yaml
 apiVersion: v1
-baseDomain: test.ocp.com
+baseDomain: test.ocp.com ## Put your domain name need to update in dns configs
 metadata:
   name: test
 platform:
