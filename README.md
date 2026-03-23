@@ -90,10 +90,18 @@ flowchart TD
 
 ### Step 1 — Prepare Installation Directory
 ```bash
+# 1. Create install directory
 mkdir -p ~/ocp-install
 cd ~/ocp-install
 cp ~/pull-secret.json .
 cp ~/.ssh/id_rsa.pub .
+
+# 2. Start SSH agent and load key
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/id_rsa
+
+# 3. Verify
+ssh-add -l
 ```
 
 ---
