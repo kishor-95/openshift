@@ -1,6 +1,6 @@
-# OpenShift 4.14.x Post-Installation Configuration (HA UPI)
+# OpenShift 4.19.x Post-Installation Configuration (HA UPI)
 
-This guide covers essential **post-installation configurations** for an **OpenShift 4.14.x High Availability UPI cluster** on bare metal. It includes image registry setup, self-signed TLS configuration, local user creation, and key troubleshooting commands.
+This guide covers essential **post-installation configurations** for an **OpenShift 4.19.x High Availability UPI cluster** on bare metal. It includes image registry setup, self-signed TLS configuration, local user creation, and key troubleshooting commands.
 
 ---
 
